@@ -1,0 +1,19 @@
+{
+    "header" : 
+    {
+        "platform" : "nutekt-digital",
+        "module" : "osc",
+        "api" : "1.1-0",
+        "dev_id" : 0,
+        "prg_id" : 0,
+        "version" : "1.0-0",
+        "name" : "Laurie",
+        "num_param" : 4,
+        "params" : [
+            ["Scale", 0, 4,  ""],
+            ["Glide", 0, 2,  ""],
+            ["Vmode", 0, 1,  ""],
+            ["Arp", 0, 2,  ""]
+        ]
+    }
+}
