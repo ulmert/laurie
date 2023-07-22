@@ -10,12 +10,14 @@ uint8_t intervals[] = {
     12, 0,1,2,3,4,5,6,7,8,9,10,11, // Chromatic
 };
 
+#define CHORD_ITEM_SIZE 4
+
 uint8_t chords[] = {
     0,0,3,7,
     0,0,4,6,
     0,0,4,7,
     0,0,4,13,
-    0,0,4,9
+    0,0,4,9,
 };
 
 uint16_t interval_look_up[N_INTERVALS];
@@ -32,6 +34,7 @@ void intervals_init() {
 }
 
 inline uint8_t getNote(uint8_t scale, uint8_t root, uint8_t val) {
+    
     uint8_t ofs = interval_look_up[scale];
     uint8_t len = intervals[ofs];
     uint8_t oct = val / len;
