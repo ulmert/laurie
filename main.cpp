@@ -34,13 +34,14 @@
 #include "intervals.h"
 
 static float glide[3][4] = {
-  {0.1, 1.f, 0.7, 0.5},
-  {0.5, 0.5, 0.9, 0.7},
-  {1.f, 1.f, 1.f, 1.f}
+  {0.05, 1.f, 0.7, 0.5},
+  {0.1, 0.5, 0.9, 0.7},
+  {0.25, 0.1, 0.1, 0.1}
 };
 
-static uint8_t arp[2][4] = {
-  {1,64,32,1},
+static uint8_t arp[3][4] = {
+  {1,64,32,16},
+  {1,32,16,1},
   {1,1,2,1}
 };
 
@@ -54,7 +55,7 @@ struct voice {
   float lfo_t0, lfo_c0, lfo_v0, lfo_vc0;
   float lfo_t1, lfo_c1, lfo_v1, lfo_vc1;
 
-  float env_cmb0, env_cmb1;
+  float env_cmb0, env_cmb1, env_cmb2;
 
   float fo;
 
@@ -80,9 +81,51 @@ uint8_t xp;
 uint8_t yp;
 
 uint8_t voice_mode;
-
 uint8_t arp_mode;
 
+uint8_t pendingTrigger;
+
+bool hold;
+
+inline void triggerX(uint8_t x) {
+  if (arp_mode == 3) {
+    voices[arp_index].retrigger = osc_rand() & 0xff | 1;
+  } else {
+    voices[0].retrigger = arp[arp_mode][0];
+  }
+
+  voices[0].note_pending = x + chords[scale * CHORD_ITEM_SIZE];
+  if (voice_mode) {
+    if (arp_mode == 3) {
+      voices[3].retrigger = osc_rand() & 0xff | 1;
+    } else {
+      voices[3].retrigger = arp[arp_mode][3];
+    }
+    voices[3].note_pending = x + chords[scale * CHORD_ITEM_SIZE + 4];
+  }
+}
+
+inline void triggerY(uint8_t y) {
+  voices[1].note_pending = y + chords[scale * CHORD_ITEM_SIZE + 1];
+  voices[2].note_pending = y + chords[scale * CHORD_ITEM_SIZE + 2];
+  if (!voice_mode) {
+    voices[3].note_pending = y + chords[scale * CHORD_ITEM_SIZE + 3];
+  }
+
+  if (arp_mode == 3) {
+    voices[1].retrigger = osc_rand() & 0xff | 1;
+    voices[2].retrigger = osc_rand() & 0xff | 1;
+    if (!voice_mode) {
+      voices[3].retrigger = osc_rand() & 0xff | 1;
+    }
+  } else {
+    voices[1].retrigger = arp[arp_mode][1];
+    voices[2].retrigger = arp[arp_mode][2];
+    if (!voice_mode) {
+      voices[3].retrigger = arp[arp_mode][3];
+    }
+  }
+}
 
 void OSC_INIT(uint32_t platform, uint32_t api)
 {
@@ -106,8 +149,8 @@ void OSC_INIT(uint32_t platform, uint32_t api)
     
     voices[i].root_note = 36;
 
-    voices[i].env_a0 = k_samplerate_recipf;
-    voices[i].env_r0 = k_samplerate_recipf * 0.1;
+    voices[i].env_a0 = k_samplerate_recipf * (i + 1);
+    voices[i].env_r0 = k_samplerate_recipf * ((i + 1) / 10.f);
     voices[i].env_t0 = 0.f;
     voices[i].env_v0 = 0.f;
 
@@ -133,17 +176,22 @@ void OSC_INIT(uint32_t platform, uint32_t api)
     i++;
   }
 
+  voices[0].fo = 2;
+
   xp = 0.5;
   yp = 0.5;
 
   voice_mode = 0;
 
-  arp_index = 0;
+  arp_index = 1;
   arp_mode = 0;
 
   scale = 0;
 
   root_note = 36;
+
+  hold = false;
+  pendingTrigger = false;
 }
 
 inline void update_env(voice *vce, uint32_t frames) {
@@ -184,7 +232,8 @@ void OSC_CYCLE(const user_osc_param_t * const params, int32_t *yn, const uint32_
     vce->lfo_t1 += (vce->lfo_c1 * frames);
 
     vce->env_cmb0 = vce->lfo_v0 * vce->env_v0 * 0.25;
-    vce->env_cmb1 = vce->lfo_v1 * vce->env_v1 * 0.2;
+    vce->env_cmb1 = vce->lfo_v1 * vce->env_v1 * 0.25;
+    vce->env_cmb2 = vce->lfo_v0 * vce->env_v0 * 0.2;
 
     i++;
   }
@@ -192,23 +241,21 @@ void OSC_CYCLE(const user_osc_param_t * const params, int32_t *yn, const uint32_
   q31_t * __restrict y = (q31_t *)yn;
   const q31_t * y_e = y + frames;
 
-  float s,v;
+  float s;
   for (; y != y_e; ) {
     s = 0;
     i = 0;
+    
     while (i < 4) {
       voice *vce = &voices[i];
       
       const float t = vce->t;
       if (i || voice_mode) {
-        v = osc_parf(t);
+        s += osc_parf(t) * vce->env_cmb0 + (osc_sinf(t * vce->fo + vce->lfo_v0) * osc_sinf(t * 16.f)) * vce->env_cmb1;
       } else {
-        v = osc_sinf(t) * (2 * osc_sinf(t * 3.f)) * (vce->env_v0);
+        s += osc_sinf(t) * (2 * osc_sinf(t * (3.f))) * (vce->env_v0) * vce->env_cmb2 + (osc_sinf(t * vce->fo + vce->lfo_v0) * osc_sinf(t * 16.f)) * vce->env_cmb1;
       }
-      v = v * vce->env_cmb0; 
-
-      s += v + (osc_sinf(t * vce->fo + vce->lfo_v0) * osc_sinf(t * 16.f)) * vce->env_cmb1;
-
+ 
       vce->t = (t + vce->c);
       if (vce->t > 1.f) {
         vce->t -= 1.f;
@@ -234,7 +281,7 @@ void OSC_CYCLE(const user_osc_param_t * const params, int32_t *yn, const uint32_
             update_env(vce, 1);
           }
         }
-        float d = vce->glide_f * (vce->c - (k_samplerate_recipf * osc_notehzf(getNote(scale, vce->root_note, vce->note + chords[scale * 4 + i]))));
+        float d = vce->glide_f * (vce->c - (k_samplerate_recipf * osc_notehzf(getNote(scale, vce->root_note, vce->note))));
         vce->c -= d;
       }
       i++;
@@ -246,22 +293,33 @@ void OSC_CYCLE(const user_osc_param_t * const params, int32_t *yn, const uint32_
 
 void OSC_NOTEON(const user_osc_param_t * const params) 
 {
-  root_note = ((params->pitch)>>8) % 24 + 36;
-
-  if (arp_mode == 2) {
-     voices[arp_index].retrigger = osc_rand() & 0xff | 1;
+  uint8_t note = ((params->pitch)>>8);
+  if (note < 48) {
+    hold = true;
   } else {
-    voices[arp_index].retrigger = arp[arp_mode][arp_index];
-  }
-  arp_index++;
-  if (arp_index > 3) {
-    arp_index = 0;
+    root_note = note % 24 + 36;
+
+    voices[arp_index].retrigger = 1.f;
+    arp_index++;
+    if (arp_index > 3) {
+      arp_index = 1;
+    }
   }
 }
 
 void OSC_NOTEOFF(const user_osc_param_t * const params)
 {
-  
+  if (hold) {
+    if (pendingTrigger & 1) {
+      triggerX(xp);
+      pendingTrigger ^= 1;
+    }
+    if (pendingTrigger & 2) {
+      triggerY(yp);
+      pendingTrigger ^= 2;
+    }
+    hold = false;
+  }
 }
 
 void OSC_PARAM(uint16_t index, uint16_t value)
@@ -297,49 +355,24 @@ void OSC_PARAM(uint16_t index, uint16_t value)
     case k_user_osc_param_shape:
       x = (uint8_t)(valf * intervalSize); 
       if (x != xp) {
-        xp = x;
-
-        if (arp_mode == 2) {
-          voices[arp_index].retrigger = osc_rand() & 0xff | 1;
+        if (!hold) {
+          triggerX(x);
         } else {
-          voices[0].retrigger = arp[arp_mode][0];
+          pendingTrigger |= 1;
         }
-
-        voices[0].note_pending = x;
-        if (voice_mode) {
-          if (arp_mode == 2) {
-            voices[2].retrigger = osc_rand() & 0xff | 1;
-          } else {
-            voices[2].retrigger = arp[arp_mode][2];
-          }
-          voices[2].note_pending = x;
-        }
+        xp = x;
       }
       break;
 
     case k_user_osc_param_shiftshape:
       y = (uint8_t)(valf * intervalSize); 
       if (y != yp) {
-        yp = y;
-        voices[1].note_pending = y;
-        if (!voice_mode) {
-          voices[2].note_pending = y;
-        }
-        voices[3].note_pending = y;
-
-        if (arp_mode == 2) {
-          voices[1].retrigger = osc_rand() & 0xff | 1;
-          if (!voice_mode) {
-            voices[2].retrigger = osc_rand() & 0xff | 1;
-          }
-          voices[3].retrigger = osc_rand() & 0xff | 1;
+        if (!hold) {
+          triggerY(y);
         } else {
-          voices[1].retrigger = arp[arp_mode][1];
-          if (!voice_mode) {
-            voices[2].retrigger = arp[arp_mode][2];
-          }
-          voices[3].retrigger = arp[arp_mode][3];
+          pendingTrigger |= 2;
         }
+        yp = y;
       }
       break;
 
