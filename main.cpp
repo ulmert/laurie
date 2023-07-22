@@ -36,13 +36,14 @@
 static float glide[3][4] = {
   {0.05, 1.f, 0.7, 0.5},
   {0.1, 0.5, 0.9, 0.7},
-  {0.25, 0.1, 0.1, 0.1}
+  {0.25, 0.75, 0.1, 0.1}
 };
 
-static uint8_t arp[3][4] = {
+static uint8_t arp[4][4] = {
   {1,64,32,16},
   {1,32,16,1},
-  {1,1,2,1}
+  {1,1,2,1},
+  {1,1,1,1}
 };
 
 struct voice {
@@ -89,7 +90,7 @@ bool hold;
 
 inline void triggerX(uint8_t x) {
   if (arp_mode == 3) {
-    voices[arp_index].retrigger = osc_rand() & 0xff | 1;
+    voices[0].retrigger = osc_rand() & 0xff | 1;
   } else {
     voices[0].retrigger = arp[arp_mode][0];
   }
