@@ -311,7 +311,7 @@ void OSC_CYCLE(const user_osc_param_t * const params, int32_t *yn, const uint32_
     s += (osc_parf(t2) + osc_parf(t2 + vce2->env_cmb2)) * vce2->env_cmb0 + (osc_sinf(t2 * vce2->fo + vce2->lfo_v0) * osc_sinf(t2 * 16.f)) * vce2->env_cmb1;
     t2 += vce2->c;
 
-    s += osc_parf(t3 + vce3->env_cmb2) * vce3->env_cmb2 + (osc_sinf(t3 * vce3->fo + vce3->lfo_v0) * osc_sinf(t2 * 16.f)) * vce3->env_cmb1;
+    s += osc_parf(t3 + vce3->env_cmb2) * vce3->env_cmb2 + (osc_sinf(t3 * vce3->fo + vce3->lfo_v0) * osc_sinf(t3 * 16.f)) * vce3->env_cmb1;
     t3 += vce3->c;
 #endif
 
