@@ -33,9 +33,11 @@
 #include "userosc.h"
 #include "intervals.h"
 
+//#define CROSSMOD
+
 static float glide[3][4] = {
-  {0.0005, 1.f, 0.07, 0.05},
-  {0.05, 0.05, 0.09, 0.07},
+  {0.05, 1.f, 0.7, 0.5},
+  {0.5, 0.05, 0.09, 0.07},
   {1.f, 1.f, 1.f, 1.f}
 };
 
@@ -162,7 +164,7 @@ void OSC_INIT(uint32_t platform, uint32_t api)
     voices[i].env_t1 = 0.f;
     voices[i].env_v1 = 0.f;
 
-    voices[i].lfo_c0 = k_samplerate_recipf * (4.5 - i);
+    voices[i].lfo_c0 = k_samplerate_recipf * (i + 1);
     voices[i].lfo_t0 = 0.f;
     voices[i].lfo_v0 = 0.f;
 
@@ -179,8 +181,6 @@ void OSC_INIT(uint32_t platform, uint32_t api)
 
     i++;
   }
-
-  voices[0].fo = 2;
 
   xp = 0.5;
   yp = 0.5;
@@ -222,8 +222,10 @@ void OSC_CYCLE(const user_osc_param_t * const params, int32_t *yn, const uint32_
 
   while (i < 4) {
     voice *vce = &voices[i];
+
     if (vce->t > 1.f) {
-      vce->t -= 1.f;
+      vce->t = vce->t - 1.f;
+
       if (vce->retrigger) {
         vce->retrigger--;
         if (!vce->retrigger) {
@@ -259,10 +261,10 @@ void OSC_CYCLE(const user_osc_param_t * const params, int32_t *yn, const uint32_
     vce->lfo_v1 = (osc_sinf(vce->lfo_t1) + 1.f) * 0.5;
     vce->lfo_t1 += (vce->lfo_c1 * frames);
 
-    vce->env_cmb0 = vce->lfo_v0 * vce->env_v0 * 0.2;
+    vce->env_cmb0 = vce->lfo_v0 * vce->env_v0 * 0.15;
     vce->env_cmb1 = vce->lfo_v1 * vce->env_v1 * 0.2;
-    vce->env_cmb2 = vce->lfo_v0 * vce->env_v0 * 0.05;
-
+    vce->env_cmb2 = vce->lfo_v0 * vce->env_v0 * 0.3;
+   
     i++;
   }
 
@@ -270,27 +272,56 @@ void OSC_CYCLE(const user_osc_param_t * const params, int32_t *yn, const uint32_
   const q31_t * y_e = y + frames;
 
   float s;
-  for (; y != y_e; ) {
-    s = 0;
-    i = 0;
-    
-    while (i < 4) {
-      voice *vce = &voices[i];
-      
-      const float t = vce->t;
-    
-      if (i || voice_mode) {
-        s += osc_parf(t) * vce->env_cmb0 + (osc_sinf(t * vce->fo + vce->lfo_v0) * osc_sinf(t * 16.f)) * vce->env_cmb1;
-      } else {
-        s += osc_sinf(t) * (2 * osc_sinf(t * (2.f))) * vce->env_cmb2 + (osc_sinf(t * vce->fo + vce->lfo_v0) * osc_sinf(t * 16.f)) * vce->env_cmb1;
-      }
 
-      vce->t = (t + vce->c);
-      vce->c -= (vce->glide_f * (vce->c - vce->ct));
-      i++;
-    }
+  voice *vce0 =  &voices[0];
+  voice *vce1 =  &voices[1];
+  voice *vce2 =  &voices[2];
+  voice *vce3 =  &voices[3];
+
+  vce0->c -= (vce0->glide_f * (vce0->c - vce0->ct));
+  vce1->c -= (vce1->glide_f * (vce1->c - vce1->ct));
+  vce2->c -= (vce2->glide_f * (vce2->c - vce2->ct));
+  vce3->c -= (vce3->glide_f * (vce3->c - vce3->ct));
+
+  float t0 = vce0->t;
+  float t1 = vce1->t;
+  float t2 = vce2->t;
+  float t3 = vce3->t;
+
+  for (; y != y_e; ) {
+#ifdef CROSSMOD    
+    s = (osc_parf(t0) + osc_parf(t0 + vce0->env_cmb2)) * vce0->env_cmb0 + (osc_sinf(t1 * vce0->fo + vce0->lfo_v0) * osc_sinf(t0 * 16.f)) * vce0->env_cmb1;
+    t0 += vce0->c;
+
+    s += osc_parf(t1 + vce1->env_cmb2) * vce1->env_cmb2 + (osc_sinf(t0 * vce1->fo + vce1->lfo_v0) * osc_sinf(t1 * 16.f)) * vce1->env_cmb1;
+    t1 += vce1->c;
+
+    s += (osc_parf(t2) + osc_parf(t2 + vce2->env_cmb2)) * vce2->env_cmb0 + (osc_sinf(t3 * vce2->fo + vce2->lfo_v0) * osc_sinf(t2 * 16.f)) * vce2->env_cmb1;
+    t2 += vce2->c;
+
+    s += osc_parf(t3 + vce3->env_cmb2) * vce3->env_cmb2 + (osc_sinf(t3 * vce3->fo + vce3->lfo_v0) * osc_sinf(t2 * 16.f)) * vce3->env_cmb1;
+    t3 += vce3->c;
+#else
+    s = (osc_parf(t0) + osc_parf(t0 + vce0->env_cmb2)) * vce0->env_cmb0 + (osc_sinf(t0 * vce0->fo + vce0->lfo_v0) * osc_sinf(t0 * 16.f)) * vce0->env_cmb1;
+    t0 += vce0->c;
+
+    s += osc_parf(t1 + vce1->env_cmb2) * vce1->env_cmb2 + (osc_sinf(t1 * vce1->fo + vce1->lfo_v0) * osc_sinf(t1 * 16.f)) * vce1->env_cmb1;
+    t1 += vce1->c;
+
+    s += (osc_parf(t2) + osc_parf(t2 + vce2->env_cmb2)) * vce2->env_cmb0 + (osc_sinf(t2 * vce2->fo + vce2->lfo_v0) * osc_sinf(t2 * 16.f)) * vce2->env_cmb1;
+    t2 += vce2->c;
+
+    s += osc_parf(t3 + vce3->env_cmb2) * vce3->env_cmb2 + (osc_sinf(t3 * vce3->fo + vce3->lfo_v0) * osc_sinf(t2 * 16.f)) * vce3->env_cmb1;
+    t3 += vce3->c;
+#endif
+
     *(y++) = f32_to_q31(s);
   }
+
+  vce0->t = t0;
+  vce1->t = t1;
+  vce2->t = t2;
+  vce3->t = t3;
 
 }
 
