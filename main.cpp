@@ -34,22 +34,25 @@
 #include "intervals.h"
 
 static float glide[3][4] = {
-  {0.05, 1.f, 0.7, 0.5},
-  {0.1, 0.5, 0.9, 0.7},
-  {0.25, 0.75, 0.1, 0.1}
+  {0.0005, 1.f, 0.07, 0.05},
+  {0.05, 0.05, 0.09, 0.07},
+  {1.f, 1.f, 1.f, 1.f}
 };
 
-static uint8_t arp[4][4] = {
+static uint8_t arp[3][4] = {
   {1,64,32,16},
-  {1,32,16,1},
-  {1,1,2,1},
+  {1,3,2,1},
   {1,1,1,1}
 };
+#define ARP_LAST 2
 
 struct voice {
   float t;
   float c;
- 
+  float ct;
+
+  float f;
+
   float env_a0, env_r0, env_t0, env_v0;
   float env_a1, env_r1, env_t1, env_v1;
  
@@ -68,6 +71,7 @@ struct voice {
   uint8_t root_note;
 
   uint8_t retrigger;
+
 };
 
 voice voices[4];
@@ -89,31 +93,32 @@ uint8_t pendingTrigger;
 bool hold;
 
 inline void triggerX(uint8_t x) {
-  if (arp_mode == 3) {
+  if (arp_mode == ARP_LAST) {
     voices[0].retrigger = osc_rand() & 0xff | 1;
   } else {
     voices[0].retrigger = arp[arp_mode][0];
   }
-
   voices[0].note_pending = x + chords[scale * CHORD_ITEM_SIZE];
+
   if (voice_mode) {
-    if (arp_mode == 3) {
+    if (arp_mode == ARP_LAST) {
       voices[3].retrigger = osc_rand() & 0xff | 1;
     } else {
       voices[3].retrigger = arp[arp_mode][3];
     }
-    voices[3].note_pending = x + chords[scale * CHORD_ITEM_SIZE + 4];
+    voices[3].note_pending = x + chords[scale * CHORD_ITEM_SIZE + 3];
   }
 }
 
 inline void triggerY(uint8_t y) {
   voices[1].note_pending = y + chords[scale * CHORD_ITEM_SIZE + 1];
   voices[2].note_pending = y + chords[scale * CHORD_ITEM_SIZE + 2];
+
   if (!voice_mode) {
     voices[3].note_pending = y + chords[scale * CHORD_ITEM_SIZE + 3];
   }
 
-  if (arp_mode == 3) {
+  if (arp_mode == ARP_LAST) {
     voices[1].retrigger = osc_rand() & 0xff | 1;
     voices[2].retrigger = osc_rand() & 0xff | 1;
     if (!voice_mode) {
@@ -140,15 +145,12 @@ void OSC_INIT(uint32_t platform, uint32_t api)
   voices[2].t = 0.5;
   voices[3].t = 0.75;
 
-  voices[0].glide_f = 0.1;
-  voices[1].glide_f = 1.f;
-  voices[2].glide_f = 0.7;
-  voices[3].glide_f = 0.5;
-
   uint8_t i = 0;
   while (i < 4) {
     
     voices[i].root_note = 36;
+
+    voices[i].glide_f = glide[0][i];
 
     voices[i].env_a0 = k_samplerate_recipf * (i + 1);
     voices[i].env_r0 = k_samplerate_recipf * ((i + 1) / 10.f);
@@ -171,6 +173,7 @@ void OSC_INIT(uint32_t platform, uint32_t api)
     voices[i].fo = (i + 4) * 2;
 
     voices[i].c = 0.5;
+    voices[i].ct = 0.5;
     
     voices[i].retrigger = 1;
 
@@ -192,7 +195,7 @@ void OSC_INIT(uint32_t platform, uint32_t api)
   root_note = 36;
 
   hold = false;
-  pendingTrigger = false;
+  pendingTrigger = 0;
 }
 
 inline void update_env(voice *vce, uint32_t frames) {
@@ -202,8 +205,6 @@ inline void update_env(voice *vce, uint32_t frames) {
   } else if (vce->env_t0 < 0.5) {
     vce->env_v0 = (vce->env_t0 / 0.5);
     vce->env_t0 += (vce->env_a0 * frames);
-  } else {
-    vce->env_v0 = 0.f;
   }
 
   if (vce->env_t1 >= 0.5 && vce->env_t1 < 1.f) {
@@ -212,16 +213,42 @@ inline void update_env(voice *vce, uint32_t frames) {
   } else if (vce->env_t1 < 0.5) {
     vce->env_v1 = (vce->env_t1 / 0.5);
     vce->env_t1 += (vce->env_a1 * frames);
-  }else {
-    vce->env_v1 = 0.f;
   }
 }
 
 void OSC_CYCLE(const user_osc_param_t * const params, int32_t *yn, const uint32_t frames)
 {
   uint8_t i = 0;
+
   while (i < 4) {
     voice *vce = &voices[i];
+    if (vce->t > 1.f) {
+      vce->t -= 1.f;
+      if (vce->retrigger) {
+        vce->retrigger--;
+        if (!vce->retrigger) {
+          vce->root_note = root_note;
+          vce->note = vce->note_pending;
+
+          vce->f = osc_notehzf(getNote(scale, vce->root_note, vce->note));
+
+          vce->ct = k_samplerate_recipf * vce->f;
+
+          if (vce->env_t0 >= 0.5) {
+              vce->env_t0 = 0.5 - (vce->env_t0 - 0.5);
+              if (vce->env_t0 < 0.f) {
+                vce->env_t0 = 0.f;
+              }
+            }
+          if (vce->env_t1 >= 0.5) {
+            vce->env_t1 = 0.5 - (vce->env_t1 - 0.5);
+            if (vce->env_t1 < 0.f) {
+              vce->env_t1 = 0.f;
+            }
+          }
+        }
+      }
+    }
 
     update_env(vce, frames);
 
@@ -232,9 +259,9 @@ void OSC_CYCLE(const user_osc_param_t * const params, int32_t *yn, const uint32_
     vce->lfo_v1 = (osc_sinf(vce->lfo_t1) + 1.f) * 0.5;
     vce->lfo_t1 += (vce->lfo_c1 * frames);
 
-    vce->env_cmb0 = vce->lfo_v0 * vce->env_v0 * 0.25;
-    vce->env_cmb1 = vce->lfo_v1 * vce->env_v1 * 0.25;
-    vce->env_cmb2 = vce->lfo_v0 * vce->env_v0 * 0.2;
+    vce->env_cmb0 = vce->lfo_v0 * vce->env_v0 * 0.2;
+    vce->env_cmb1 = vce->lfo_v1 * vce->env_v1 * 0.2;
+    vce->env_cmb2 = vce->lfo_v0 * vce->env_v0 * 0.05;
 
     i++;
   }
@@ -251,45 +278,20 @@ void OSC_CYCLE(const user_osc_param_t * const params, int32_t *yn, const uint32_
       voice *vce = &voices[i];
       
       const float t = vce->t;
+    
       if (i || voice_mode) {
         s += osc_parf(t) * vce->env_cmb0 + (osc_sinf(t * vce->fo + vce->lfo_v0) * osc_sinf(t * 16.f)) * vce->env_cmb1;
       } else {
-        s += osc_sinf(t) * (2 * osc_sinf(t * (3.f))) * (vce->env_v0) * vce->env_cmb2 + (osc_sinf(t * vce->fo + vce->lfo_v0) * osc_sinf(t * 16.f)) * vce->env_cmb1;
+        s += osc_sinf(t) * (2 * osc_sinf(t * (2.f))) * vce->env_cmb2 + (osc_sinf(t * vce->fo + vce->lfo_v0) * osc_sinf(t * 16.f)) * vce->env_cmb1;
       }
- 
+
       vce->t = (t + vce->c);
-      if (vce->t > 1.f) {
-        vce->t -= 1.f;
-
-        if (vce->retrigger) {
-          vce->retrigger--;
-          if (!vce->retrigger) {
-            vce->root_note = root_note;
-            vce->note = vce->note_pending;
-
-            if (vce->env_t0 >= 0.5) {
-              vce->env_t0 = 0.5 - (vce->env_t0 - 0.5);
-              if (vce->env_t0 < 0.f) {
-                vce->env_t0 = 0.f;
-              }
-            }
-            if (vce->env_t1 >= 0.5) {
-              vce->env_t1 = 0.5 - (vce->env_t1 - 0.5);
-              if (vce->env_t1 < 0.f) {
-                vce->env_t1 = 0.f;
-              }
-            }
-            update_env(vce, 1);
-          }
-        }
-        float d = vce->glide_f * (vce->c - (k_samplerate_recipf * osc_notehzf(getNote(scale, vce->root_note, vce->note))));
-        vce->c -= d;
-      }
+      vce->c -= (vce->glide_f * (vce->c - vce->ct));
       i++;
     }
     *(y++) = f32_to_q31(s);
   }
-  
+
 }
 
 void OSC_NOTEON(const user_osc_param_t * const params) 
