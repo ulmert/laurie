@@ -38,6 +38,7 @@ inline uint8_t getNote(uint8_t scale, uint8_t root, uint8_t val) {
     uint8_t ofs = interval_look_up[scale];
     uint8_t len = intervals[ofs];
     uint8_t oct = val / len;
+   
     return (root + (oct * 12) + intervals[ofs + 1 + (val % len)]);
 }
 
